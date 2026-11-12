@@ -27,10 +27,11 @@ and the backtest numbers):
 Backtest (local scorer, an exact port of the rules; it reproduces the
 published house-baseline practice score -43.512039 to 6 decimals):
   * practice window (history to 2026-11-07T23:00Z, scored on the 10 archive
-    reads to 2026-11-10): this forecaster -33.369, baseline -43.512
-    (typical probability per place 0.0356 vs 0.0129), 6.4 top-10 hits.
-  * walk-forward (5 cuts inside the history, next 72 h each): mean -36.62
-    vs baseline -43.39.
+    reads to 2026-11-10): this forecaster -33.567, baseline -43.512
+    (typical probability per place 0.0349 vs 0.0129), 6.4 top-10 hits.
+  * walk-forward (5 cuts inside the history, next 72 h each): mean -35.64
+    vs baseline -43.39. Without the SPREAD flattening the same harness
+    scores -33.369 practice / -36.71 walk-forward mean.
 """
 
 import json
@@ -46,6 +47,16 @@ LAGS = [6, 12, 24, 36, 48, 60, 72]
 R_ROWS = 2   # smoothing over the starting rank
 R_COLS = 2   # smoothing over the landing rank
 LAG_TOL = 0.4  # relative lag tolerance for pair weights
+# SPREAD flattens the time-averaged probabilities before naming: every named
+# p is scaled by this factor and the released mass stays in the unnamed share.
+# The kernel is estimated from only ~34 reads, so its time-averaged
+# distribution is overconfident for a 72 h-ahead log score (a confident miss
+# costs ln(0.0001) = -9.21 per place). Walk-forward backtest (5 cuts, next
+# 72 h each): SPREAD 0.9 improves the mean from -36.71 to -35.64, at a
+# practice-window cost of -33.37 -> -33.57, inside the practice read noise
+# (SE ~1.1 over 10 reads). The 0.85-0.92 plateau all score alike, so 0.9 is
+# a flat optimum, not a knife-edge fit.
+SPREAD = 0.9
 
 
 def parse_time(s):
@@ -183,6 +194,12 @@ def forecast(rows, places=10):
                 p = dist[k]
                 if p > 0:
                     probs[(uid, k)] = probs.get((uid, k), 0.0) + p * per_hour
+    # Flatten: scale every time-averaged probability by SPREAD (see above).
+    # The released mass is not re-assigned to any game; it stays in the
+    # unnamed share, which raises the floor for games the kernel did not
+    # name at that place.
+    if SPREAD != 1.0:
+        probs = {k: v * SPREAD for k, v in probs.items()}
     # Greedy naming: name a game at a place only while its probability beats
     # the unnamed share it would otherwise receive.
     n_chart = len(chart)
